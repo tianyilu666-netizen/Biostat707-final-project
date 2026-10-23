@@ -2,7 +2,7 @@
 
 ## Breast Mass Classification Model Comparison
 
-We will compare logistic regression, regularized logistic regression, random forest, gradient boosting, and support vector machines for classifying breast masses as malignant or benign. The analysis will evaluate discrimination, probability calibration, and sensitivity–specificity tradeoffs using a common validation design.
+We will compare logistic regression, regularized logistic regression, random forest, decision tree, and support vector machines for classifying breast masses as malignant or benign. The analysis will evaluate discrimination, probability calibration, and sensitivity–specificity tradeoffs using a common validation design.
 
 The intended application is an educational investigation of classification after fine-needle aspiration and extraction of nuclear image features. The project does not predict future cancer onset, establish clinical utility, or provide a tool for clinical deployment.
 
@@ -13,10 +13,15 @@ The intended application is an educational investigation of classification after
 | Tianyi Lu | Data preparation, shared splits, constant-probability baseline, and final evaluation |
 | Haiyi Xiong | Logistic regression and Elastic Net logistic regression |
 | Yan Yan | Random forest |
-| Wenqing Zhao | Histogram gradient boosting |
+| Wenqing Zhao | Decision tree |
 | Asher Xu | Linear-kernel and RBF-kernel SVM |
 
 Each model owner will implement training and tuning, produce standardized prediction outputs, interpret their model, and write the corresponding report section. All members will contribute to code review, discussion, and presentation. Each member will commit their own work from their own GitHub account and submit an individual contribution statement as required by the course.
+
+### Wenqing Zhao: Planned decision tree analysis
+
+The decision tree will be tuned using the shared stratified five-fold cross-validation folds. We will test 12 combinations of `max_depth` (`3`, `5`, `7`, `None`) and `min_samples_leaf` (`5`, `10`, `20`), selecting settings by mean validation AUROC. We will check for overfitting, generate development out-of-fold probabilities, and select a fixed threshold targeting at least 95% development sensitivity. We will also examine feature importance and compare the decision tree with other models using discrimination, calibration, sensitivity, and specificity. The final test set will not be used for tuning or threshold selection.
+
 
 ## Proposal
 
@@ -25,10 +30,8 @@ The project proposal is located at the repository root as [707-proposal.md](707-
 ## Data source and license
 
 - **Dataset:** Breast Cancer Wisconsin (Diagnostic), also known as WDBC.
-- **Original source:** [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/17/breast+cancer+wisconsin+diagnostic).
-- **Original archive:** [Download from UCI](https://archive.ics.uci.edu/static/public/17/breast+cancer+wisconsin+diagnostic.zip).
-- **Dataset DOI:** [10.24432/C5DW2B](https://doi.org/10.24432/C5DW2B).
-- **License:** [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/).
+- **Dataset source (UCI Machine Learning Repository):** [Breast Cancer Wisconsin (Diagnostic), DOI: 10.24432/C5DW2B](https://doi.org/10.24432/C5DW2B).
+- **License:** Creative Commons. Attribution 4.0 International (CC BY 4.0). https://creativecommons.org/licenses/by/4.0/.
 
 The dataset license permits sharing and adaptation with appropriate credit, a license link, and an indication of modifications. This license applies to the UCI dataset; it does not automatically license our project code.
 
@@ -54,7 +57,7 @@ powershell -ExecutionPolicy Bypass -File ./download-and-check-data.ps1 -Destinat
 
 The script requires internet access to UCI. It downloads and extracts the source archive, checks the data, and writes `data/raw/data-audit.json`. It does not fit models or create the formal development/test split.
 
-Alternatively, download the original archive using the UCI link above and extract it into `data/raw/`. The small original data files may also be included in this repository under the dataset license, retaining this attribution and the source documentation. The download script provides access to the original source even when raw data are not committed.
+Alternatively, access the UCI dataset through the DOI link above, download the original archive, and extract it into `data/raw/`. The small original data files may also be included in this repository under the dataset license, retaining this attribution and the source documentation. The download script provides access to the original source even when raw data are not committed.
 
 ## Repository organization
 
