@@ -21,12 +21,12 @@ To avoid relying on an arbitrary threshold or an uncalibrated accuracy score, al
 - **Quantile Calibration Curves**: Assessed using 5 equal-frequency bins. Expected Calibration Error (ECE) summarizes the frequency-weighted absolute deviation between bin mean prediction and observed malignancy frequency.
 
 ### 1.3 Clinical Decision Thresholds
-Rather than assuming a default cutoff of $p = 0.5$ (which implicitly assigns equal utility to false positives and false negatives), we select a **pre-specified clinical operating point targeting $\ge 95\%$ sensitivity on development out-of-fold predictions**. 
+Rather than assuming a default cutoff of $p = 0.5$ (which implicitly assigns equal utility to false positives and false negatives), we select a **pre-specified exploratory operating point targeting $\ge 95\%$ sensitivity on development out-of-fold predictions**. This target is not an established clinical standard.
 - Once determined on development OOF, this numerical threshold is **strictly locked** and transferred without modification to the held-out test cohort.
 - Classification metrics evaluated at this threshold include: True Positives (TP), False Positives (FP), False Negatives (FN), True Negatives (TN), Sensitivity, Specificity, Positive Predictive Value (PPV), and Negative Predictive Value (NPV).
 
 ### 1.4 Statistical Uncertainty
-- To account for sampling variability without inflating confidence, we employ **2,000 paired, class-stratified bootstrap resamples** of the held-out evaluation set to estimate 95% percentile confidence intervals for AUROC, Brier score, and pairwise model contrasts.
+- To account for sampling variability without inflating confidence, we employ **2,000 paired, class-stratified bootstrap resamples** of the held-out evaluation set to estimate 95% percentile confidence intervals for AUROC, Brier score, and paired model contrasts. When the full-feature logistic model is available, it is the prespecified comparator; before other model predictions arrive, no pairwise contrast can be estimated.
 
 ---
 
@@ -42,26 +42,26 @@ $$\hat{p}_{\text{baseline}} = \bar{y}_{\text{train}} = \frac{170}{455} \approx 0
 - **Log Loss**: $- [0.3736 \ln(0.3736) + (1-0.3736) \ln(1-0.3736)] = 0.6609$.
 - **Calibration ECE**: 0.0000 (perfect marginal calibration, but zero case-level sharpness).
 - **Decision Threshold Tradeoff**:
-  To achieve the mandatory $\ge 95\%$ sensitivity, the constant baseline must set threshold $\le 0.3736$, thereby classifying **all 455 development patients as positive**. 
+  To achieve the exploratory $\ge 95\%$ sensitivity target, the constant baseline must set threshold $\le 0.3736$, thereby classifying **all 455 development records as positive**.
   - Achieved Sensitivity: 100.0% (0 missed cancers).
   - Achieved Specificity: 0.0% (285 unnecessary escalations among 285 benign lesions).
 
-This baseline highlights the clinical necessity of patient-specific cytological features: any informative machine learning classifier must deliver substantial reductions in unnecessary escalations while preserving high sensitivity.
+This baseline shows what patient-specific cytological features would need to improve upon: an informative classifier should reduce positive classifications among benign records while preserving high sensitivity.
 
 ---
 
 ## 3. Clinical Translation and Operating Dilemmas
 
-In post-FNA diagnostic decision support, classification errors incur profoundly asymmetric real-world consequences:
+In a hypothetical post-FNA review-prioritization setting, false negatives and false positives would have different potential consequences. The dataset alone does not establish clinical utility or a treatment pathway.
 
 1. **False Negative (Missed Malignancy, $y=1, \hat{y}=0$)**:
-   - Represents a patient with an actual malignant breast carcinoma whose lesion is misclassified as benign.
-   - Clinical ramification: Reassurance without immediate excision or biopsy, leading to diagnostic delay, tumor progression, local invasion, and poorer survival prognostication.
-   - Design imperative: The selection of the $\ge 95\%$ sensitivity operating point directly minimizes this clinical catastrophe.
+   - Represents a malignant record assigned a probability below the selected threshold.
+   - In a future validated workflow, this could correspond to a potentially missed or deprioritized malignant case.
+   - The exploratory $\ge 95\%$ development-sensitivity target is intended to limit such errors, but it does not guarantee the same sensitivity on new data.
 
 2. **False Positive (Unnecessary Escalation, $y=0, \hat{y}=1$)**:
-   - Represents a patient with a benign fibroadenoma or cyst whose FNA features trigger malignancy suspicion.
-   - Clinical ramification: Referral for surgical excision, core-needle biopsy, repeat mammography, and substantial psychological distress.
-   - While less lethal than a missed malignancy, excessive false positive rates burden hospital resources and diminish clinical adoption.
+   - Represents a benign record assigned a probability at or above the selected threshold. The dataset does not specify the benign subtype.
+   - In a future validated workflow, this could correspond to a potentially unnecessary escalation for additional review or testing.
+   - Excessive false-positive rates could reduce practical usefulness, but downstream actions and costs cannot be inferred from this dataset.
 
-Our unified evaluation pipeline explicitly visualizes this tradeoff (`results/figures/clinical_threshold_tradeoffs.png`), allowing stakeholders to directly weigh missed cancers against unnecessary procedures across competing modeling paradigms.
+Our unified evaluation pipeline visualizes counts of malignant records below the threshold and benign records above it (`results/figures/clinical_threshold_tradeoffs.png`). These counts support model comparison but should not be interpreted as demonstrated patient outcomes or clinical procedures.

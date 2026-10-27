@@ -21,14 +21,31 @@ import glob
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, precision_recall_curve
+from sklearn.metrics import (
+    average_precision_score,
+    brier_score_loss,
+    precision_recall_curve,
+    roc_auc_score,
+    roc_curve,
+)
 from metrics import (
     evaluate_predictions,
     select_threshold_target_sensitivity,
-    compute_classification_at_threshold,
     compute_calibration_curve,
-    bootstrap_confidence_intervals
+    bootstrap_confidence_intervals,
+    summarize_paired_differences,
 )
+
+OOF_REQUIRED_COLUMNS = {"id", "y_true", "model_name", "fold", "y_prob"}
+TEST_REQUIRED_COLUMNS = {"id", "y_true", "model_name", "split", "y_prob"}
+PAIRWISE_COLUMNS = [
+    "model_name",
+    "comparator",
+    "auroc_difference",
+    "auroc_difference_95_ci",
+    "brier_difference",
+    "brier_difference_95_ci",
+]
 
 MODEL_PALETTE = {
     "Constant_Baseline": "#7f7f7f",
@@ -54,6 +71,80 @@ def load_all_predictions(pred_dir="results/predictions", prefix="oof_"):
     combined = pd.concat(dfs, ignore_index=True)
     return combined
 
+
+def validate_and_align_predictions(pred_df, splits_df, expected_split):
+    """Validate prediction files and align every model to the official IDs.
+
+    This prevents silent corruption of paired comparisons when a prediction
+    file contains missing, duplicated, mislabeled, or out-of-order records.
+    """
+    if expected_split not in {"development", "test"}:
+        raise ValueError("expected_split must be 'development' or 'test'.")
+
+    required = (
+        OOF_REQUIRED_COLUMNS
+        if expected_split == "development"
+        else TEST_REQUIRED_COLUMNS
+    )
+    missing_columns = sorted(required - set(pred_df.columns))
+    if missing_columns:
+        raise ValueError(
+            f"{expected_split} predictions are missing required columns: {missing_columns}"
+        )
+    missing_model_names = pred_df["model_name"].isna()
+    blank_model_names = pred_df["model_name"].astype(str).str.strip().eq("")
+    if missing_model_names.any() or blank_model_names.any():
+        raise ValueError("Every prediction row must have a non-empty model_name.")
+
+    reference_columns = ["id", "target"]
+    if expected_split == "development":
+        reference_columns.append("cv_fold")
+    reference = (
+        splits_df.loc[splits_df["split"] == expected_split, reference_columns]
+        .sort_values("id")
+        .reset_index(drop=True)
+    )
+    if reference["id"].duplicated().any():
+        raise ValueError("Official splits contain duplicate IDs.")
+
+    expected_ids = set(reference["id"])
+    aligned = {}
+    for model_name, raw_sub in pred_df.groupby("model_name", sort=False):
+        sub = raw_sub.copy()
+        if sub["id"].isna().any() or sub["id"].duplicated().any():
+            raise ValueError(f"{model_name}: IDs must be present and unique.")
+
+        actual_ids = set(sub["id"])
+        missing_ids = list(expected_ids - actual_ids)
+        extra_ids = list(actual_ids - expected_ids)
+        if missing_ids or extra_ids:
+            raise ValueError(
+                f"{model_name}: prediction IDs do not match the official {expected_split} set "
+                f"(missing={missing_ids[:5]}, extra={extra_ids[:5]})."
+            )
+
+        sub["y_true"] = pd.to_numeric(sub["y_true"], errors="raise")
+        sub["y_prob"] = pd.to_numeric(sub["y_prob"], errors="raise")
+        if not np.isfinite(sub["y_prob"]).all() or not sub["y_prob"].between(0, 1).all():
+            raise ValueError(f"{model_name}: y_prob must be finite and within [0, 1].")
+
+        merged = reference.merge(sub, on="id", how="left", validate="one_to_one")
+        if not np.array_equal(merged["target"].to_numpy(), merged["y_true"].to_numpy()):
+            raise ValueError(f"{model_name}: y_true does not match the official target labels.")
+
+        if expected_split == "development":
+            merged["fold"] = pd.to_numeric(merged["fold"], errors="raise")
+            if not np.array_equal(merged["cv_fold"].to_numpy(), merged["fold"].to_numpy()):
+                raise ValueError(f"{model_name}: fold assignments do not match splits.csv.")
+        elif not sub["split"].eq("test").all():
+            raise ValueError(f"{model_name}: all final prediction rows must have split='test'.")
+
+        aligned[str(model_name)] = merged
+
+    if not aligned:
+        raise ValueError(f"No valid {expected_split} model predictions were found.")
+    return aligned
+
 def plot_curves(models_dict, y_true, output_prefix="results/figures/"):
     """
     Plots ROC, PR, and Calibration curves for all available models.
@@ -65,7 +156,6 @@ def plot_curves(models_dict, y_true, output_prefix="results/figures/"):
     for name, probs in models_dict.items():
         color = MODEL_PALETTE.get(name, None)
         fpr, tpr, _ = roc_curve(y_true, probs)
-        from sklearn.metrics import roc_auc_score
         try:
             auc = roc_auc_score(y_true, probs)
         except ValueError:
@@ -88,7 +178,6 @@ def plot_curves(models_dict, y_true, output_prefix="results/figures/"):
     for name, probs in models_dict.items():
         color = MODEL_PALETTE.get(name, None)
         precision, recall, _ = precision_recall_curve(y_true, probs)
-        from sklearn.metrics import average_precision_score
         ap = average_precision_score(y_true, probs)
         plt.plot(recall, precision, label=f"{name.replace('_', ' ')} (AUPRC = {ap:.3f})", lw=2, color=color)
         
@@ -153,6 +242,7 @@ def run_evaluation():
     figures_dir = "results/figures"
     os.makedirs(tables_dir, exist_ok=True)
     os.makedirs(figures_dir, exist_ok=True)
+    splits_df = pd.read_csv("data/processed/splits.csv")
     
     # -------------------------------------------------------------
     # 1. Process Development Out-of-Fold Predictions
@@ -162,17 +252,18 @@ def run_evaluation():
     oof_summary_rows = []
     
     if not oof_df.empty:
-        models = oof_df["model_name"].unique()
-        print(f"Loaded OOF predictions for {len(models)} model(s): {list(models)}")
+        aligned_oof = validate_and_align_predictions(oof_df, splits_df, "development")
+        models = list(aligned_oof)
+        print(f"Loaded and validated OOF predictions for {len(models)} model(s): {models}")
         
         models_prob_dict = {}
         first_y_true = None
         
-        for m in models:
-            sub = oof_df[oof_df["model_name"] == m].sort_values("id")
-            y_true = sub["y_true"].values
+        for m, sub in aligned_oof.items():
+            y_true = sub["target"].values
             y_prob = sub["y_prob"].values
-            first_y_true = y_true
+            if first_y_true is None:
+                first_y_true = y_true
             models_prob_dict[m] = y_prob
             
             # Select threshold for >=95% sensitivity
@@ -219,23 +310,30 @@ def run_evaluation():
     # -------------------------------------------------------------
     test_df = load_all_predictions(prefix="test_")
     if not test_df.empty:
-        models = test_df["model_name"].unique()
-        print(f"\nLoaded Test predictions for {len(models)} model(s): {list(models)}")
+        aligned_test = validate_and_align_predictions(test_df, splits_df, "test")
+        models = list(aligned_test)
+        missing_oof = sorted(set(models) - set(locked_thresholds))
+        if missing_oof:
+            raise ValueError(
+                "Final test predictions have no validated development OOF threshold for: "
+                f"{missing_oof}"
+            )
+        print(f"\nLoaded and validated Test predictions for {len(models)} model(s): {models}")
         
         test_summary_rows = []
         test_tradeoff_records = []
         test_prob_dict = {}
         first_test_true = None
         
-        for m in models:
-            sub = test_df[test_df["model_name"] == m].sort_values("id")
-            y_true = sub["y_true"].values
+        for m, sub in aligned_test.items():
+            y_true = sub["target"].values
             y_prob = sub["y_prob"].values
-            first_test_true = y_true
+            if first_test_true is None:
+                first_test_true = y_true
             test_prob_dict[m] = y_prob
             
             # Use threshold locked on development OOF
-            locked_thresh = locked_thresholds.get(m, 0.5)
+            locked_thresh = locked_thresholds[m]
             res = evaluate_predictions(y_true, y_prob, fixed_threshold=locked_thresh)
             t_lock = res["threshold_target_95"]
             t05 = res["threshold_default_05"]
@@ -278,7 +376,9 @@ def run_evaluation():
         # Bootstrap 95% CIs
         if first_test_true is not None and len(test_prob_dict) > 0:
             print("Computing 2,000 paired, stratified bootstrap resamples for 95% CIs...")
-            boot_summary, _ = bootstrap_confidence_intervals(first_test_true, test_prob_dict, n_bootstraps=2000, seed=707)
+            boot_summary, boot_stats = bootstrap_confidence_intervals(
+                first_test_true, test_prob_dict, n_bootstraps=2000, seed=707
+            )
             boot_rows = []
             for m, s in boot_summary.items():
                 boot_rows.append({
@@ -291,6 +391,57 @@ def run_evaluation():
             boot_df = pd.DataFrame(boot_rows)
             boot_df.to_csv(os.path.join(tables_dir, "test_bootstrap_confidence_intervals.csv"), index=False)
             print(f"Saved bootstrap CIs to {tables_dir}/test_bootstrap_confidence_intervals.csv")
+
+            comparator = "Logistic_Regression" if "Logistic_Regression" in test_prob_dict else None
+            paired_rows = summarize_paired_differences(boot_stats, comparator=comparator)
+            formatted_rows = []
+            for row in paired_rows:
+                model_name = row["model_name"]
+                comparator_name = row["comparator"]
+                observed_auc_difference = (
+                    roc_auc_score(first_test_true, test_prob_dict[model_name])
+                    - roc_auc_score(first_test_true, test_prob_dict[comparator_name])
+                )
+                observed_brier_difference = (
+                    brier_score_loss(first_test_true, test_prob_dict[model_name])
+                    - brier_score_loss(first_test_true, test_prob_dict[comparator_name])
+                )
+                formatted_rows.append({
+                    "model_name": model_name,
+                    "comparator": comparator_name,
+                    "auroc_difference": round(observed_auc_difference, 4),
+                    "auroc_difference_95_ci": (
+                        f"[{row['auroc_difference_ci_lower']:.4f}, "
+                        f"{row['auroc_difference_ci_upper']:.4f}]"
+                    ),
+                    "brier_difference": round(observed_brier_difference, 4),
+                    "brier_difference_95_ci": (
+                        f"[{row['brier_difference_ci_lower']:.4f}, "
+                        f"{row['brier_difference_ci_upper']:.4f}]"
+                    ),
+                })
+            paired_df = pd.DataFrame(formatted_rows, columns=PAIRWISE_COLUMNS)
+            paired_path = os.path.join(tables_dir, "test_bootstrap_pairwise_differences.csv")
+            paired_df.to_csv(paired_path, index=False)
+            paired_md_path = os.path.join(tables_dir, "test_bootstrap_pairwise_differences.md")
+            if paired_df.empty:
+                print("Pairwise bootstrap table is empty because only one test model is available.")
+                with open(paired_md_path, "w", encoding="utf-8") as f:
+                    f.write("# Paired Bootstrap Model Differences\n\n")
+                    f.write(
+                        "No paired difference is estimable yet because only one validated "
+                        "test model is available.\n"
+                    )
+            else:
+                direction_note = (
+                    "Differences are model minus comparator; positive AUROC and negative Brier "
+                    "favor the named model."
+                )
+                with open(paired_md_path, "w", encoding="utf-8") as f:
+                    f.write("# Paired Bootstrap Model Differences\n\n")
+                    f.write(paired_df.to_markdown(index=False))
+                    f.write(f"\n\n*{direction_note}*\n")
+            print(f"Saved paired bootstrap differences to {paired_path}")
             
         # Clinical tradeoff plot
         plot_clinical_tradeoffs(test_tradeoff_records)

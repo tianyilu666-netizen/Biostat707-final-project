@@ -43,7 +43,7 @@ Target encoding was designated as Malignant = 1 (positive class) and Benign = 0 
 
 ## 3. Strict Validation Design and Leakage Prevention
 
-To ensure unbiased estimation and completely eliminate data leakage:
+To reduce data-leakage risk and preserve an untouched final evaluation set:
 1. **Stratified Development/Test Partition**:
    - A single, locked 80% / 20% stratified split was performed with `random_state = 707`.
    - **Development set**: 455 records (285 benign, 170 malignant; prevalence = 37.36%).
@@ -61,6 +61,6 @@ To ensure unbiased estimation and completely eliminate data leakage:
 
 All exploratory analysis was conducted strictly within the 455 development records. Table 1 summarizes the distribution of all 30 features across diagnosis classes, evaluated using non-parametric two-sided Mann-Whitney U tests:
 
-- **Nuclear Size Metrics**: Malignant nuclei exhibit significantly larger dimensions across mean, SE, and worst summaries ($p < 0.001$). For example, `area_mean` in malignant cases has a median of 929.85 $\mu\text{m}^2$ [IQR: 712.93, 1200.75] compared to 458.40 $\mu\text{m}^2$ [IQR: 380.30, 551.10] in benign cases.
+- **Nuclear Size Metrics**: Malignant nuclei exhibit significantly larger dimensions across mean, SE, and worst summaries ($p < 0.001$). For example, `area_mean` in malignant cases has a median of 929.85 [IQR: 712.93, 1200.75] in the dataset's recorded units, compared with 458.40 [IQR: 380.30, 551.10] in benign cases. The UCI documentation does not specify a physical measurement unit for these recoded feature values.
 - **Nuclear Irregularity**: Markers of architectural disorder—`concave_points_mean`, `concavity_mean`, and `compactness_mean`—display marked elevation in malignant lesions ($p < 0.001$). Malignant `concave_points_mean` has a median of 0.087 [IQR: 0.065, 0.105], nearly four times that of benign lesions (median 0.023 [IQR: 0.015, 0.033]).
-- **Severe Collinearity**: Correlation analysis (`results/figures/feature_correlation_heatmap.png`) reveals near-perfect collinearity between `radius`, `perimeter`, and `area` (Pearson $r > 0.98$ within both mean and worst subsets). This geometric dependency underscores the necessity of regularized regression (Elastic Net) and tree-based ensemble methods to maintain stability.
+- **Severe Collinearity**: Correlation analysis (`results/figures/feature_correlation_heatmap.png`) reveals very strong collinearity between `radius`, `perimeter`, and `area` (Pearson $r$ approximately 0.978–0.998 across the mean and worst subsets). This geometric dependency motivates evaluation of regularized regression (Elastic Net) and tree-based ensemble methods for stability.

@@ -110,3 +110,80 @@ Once your prediction files are saved in `results/predictions/`, run:
 python3 src/evaluate_all.py
 ```
 This automatically updates the comparison tables in `results/tables/` and comparative curves in `results/figures/`.
+
+Before evaluation, the script now validates every prediction file against
+`data/processed/splits.csv`. It stops with an error if a model has missing or
+duplicate IDs, incorrect labels or folds, non-finite/out-of-range probabilities,
+or test predictions without a development-OOF threshold. Do not bypass these
+checks or manually reorder rows.
+
+When two or more test models are available, the evaluation also writes paired
+bootstrap differences to
+`results/tables/test_bootstrap_pairwise_differences.csv`. If
+`Logistic_Regression` is available it is used as the prespecified comparator;
+otherwise all available pairs are reported. Differences are defined as model
+minus comparator, so positive AUROC differences and negative Brier-score
+differences favor the named model.
+
+---
+
+## 6. Assigned Models and Required Names
+
+Use these exact `model_name` values in prediction files so that the master
+evaluation script can recognize and compare models consistently.
+
+| Owner | Model | Required `model_name` | Prespecified search |
+|---|---|---|---|
+| Haiyi Xiong | Unpenalized logistic regression | `Logistic_Regression` | Full-feature logistic regression; document convergence and separation checks |
+| Haiyi Xiong | Elastic Net logistic regression | `Elastic_Net` | `C` in `{0.01, 0.1, 1, 10}` and `l1_ratio` in `{0.1, 0.5, 0.9, 1.0}` |
+| Yan Yan | Random forest | `Random_Forest` | 500 trees; `max_depth` in `{3, None}`, `min_samples_leaf` in `{1, 3, 5, 10}`, and `max_features` in `{sqrt, 0.5}` |
+| Wenqing Zhao | Decision tree | `Decision_Tree` | `max_depth` in `{3, 5, 7, None}` and `min_samples_leaf` in `{5, 10, 20}` |
+| Asher Xu | Linear SVM | `Linear_SVM` | `C` in `{0.01, 0.1, 1, 10}` |
+| Asher Xu | RBF SVM | `RBF_SVM` | Linear-SVM `C` grid crossed with `gamma` in `{0.001, 0.01, 0.1, 1}` |
+
+For logistic regression and SVM models, fit standardization only inside the
+current training fold. SVM probability calibration must also remain inside the
+training pipeline and must not see the validation fold used to score a
+candidate configuration.
+
+---
+
+## 7. Test-Set Lock and Required Deliverables
+
+The held-out test set is not permanently forbidden; it is embargoed until the
+model specification, hyperparameters, preprocessing, and development-OOF
+threshold are locked. After those decisions are final:
+
+1. Refit the locked pipeline once on all 455 development records.
+2. Generate probabilities once for all 114 test records without further
+   tuning, feature selection, threshold adjustment, or recalibration.
+3. Submit all of the following:
+   - executable model-training code;
+   - selected hyperparameters and development-CV selection results;
+   - runtime summary;
+   - `results/predictions/oof_<MODEL_NAME>.csv` with exactly 455 unique IDs;
+   - `results/predictions/test_<MODEL_NAME>.csv` with exactly 114 unique IDs;
+   - the locked development-OOF threshold;
+   - model-specific methods, results, interpretation, and limitations text.
+
+Each model owner is responsible for testing and explaining their own model.
+The data/evaluation lead will validate and combine standardized outputs, not
+retune or repair every model.
+
+---
+
+## 8. GitHub Handoff
+
+After the shared infrastructure PR is merged, update the team repository with:
+
+```bash
+git switch main
+git pull origin main
+python3 -m pip install -r requirements.txt
+```
+
+Create a feature branch for your assigned model, commit from your own GitHub
+account, push the branch, and open a pull request to the team repository. Do
+not push generated changes directly over another member's branch. Include the
+model name, completed checks, output filenames, and any unresolved issue in the
+pull-request description.

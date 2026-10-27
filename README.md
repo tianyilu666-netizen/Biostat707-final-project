@@ -23,7 +23,8 @@ Each model owner will implement training and tuning, produce standardized predic
 Data preparation, stratified splitting, and the common evaluation framework are fully implemented and reproducible:
 - **Unified splits:** Stratified 80% development ($N=455$) and 20% test ($N=114$) with random seed `707`. Stratified 5-fold cross-validation on the development set is saved in `data/processed/splits.csv`.
 - **Baseline model:** Constant probability baseline predicting marginal prevalence ($\hat{p} \approx 0.3736$) implemented in `src/baseline.py`.
-- **Shared evaluation:** Metric suite (`src/metrics.py`) providing AUROC, AUPRC, Brier score, log loss, 5-bin calibration curves, 95% sensitivity threshold locking on development OOF, and 2,000 paired stratified bootstrap confidence intervals.
+- **Shared evaluation:** Metric suite (`src/metrics.py`) providing AUROC, AUPRC, Brier score, log loss, 5-bin calibration curves, 95% sensitivity threshold locking on development OOF, 2,000 paired stratified bootstrap confidence intervals, and paired AUROC/Brier model differences.
+- **Current scope:** The committed comparison tables contain the constant baseline only. Final cross-model tables will be generated after all model owners provide validated OOF and held-out-test predictions.
 - **Team guide:** Detailed workflow and ingestion instructions are provided in `docs/TEAM_WORKFLOW.md`.
 
 ### Wenqing Zhao: Planned decision tree analysis
@@ -75,6 +76,7 @@ The repository is organized to ensure end-to-end reproducibility, clean separati
 .
 |-- 707-proposal.md                  # Root-level formal project proposal
 |-- README.md                        # Project documentation and instructions
+|-- requirements.txt                 # Verified Python package versions
 |-- download-and-check-data.ps1      # PowerShell UCI download and audit script
 |-- scripts/
 |   `-- download_and_check_data.py   # Cross-platform Python download and audit script
@@ -86,7 +88,7 @@ The repository is organized to ensure end-to-end reproducibility, clean separati
 |   |-- processed/
 |   |   |-- wdbc_clean.csv           # Clean data with standard headers and target (M=1, B=0)
 |   |   |-- splits.csv               # Shared 80/20 train/test and 5-fold CV assignment
-|   |   `-- data_dictionary.md       # Detailed data dictionary with units and ranges
+|   |   `-- data_dictionary.md       # Detailed data dictionary with definitions and ranges
 |   `-- splits.csv                   # Convenience root copy of shared splits
 |-- src/
 |   |-- data_prep.py                 # Clean data and shared split generator (seed=707)
@@ -96,15 +98,17 @@ The repository is organized to ensure end-to-end reproducibility, clean separati
 |   `-- evaluate_all.py              # Master multi-model evaluation and curve plotter
 |-- docs/
 |   |-- TEAM_WORKFLOW.md             # Guide for teammates to load splits and output predictions
+|   |-- GROUP_HANDOFF_MESSAGE.md     # Copy-ready WeChat handoff messages
 |   |-- data_and_cohort.md           # Draft of Data & Cohort final report section
 |   `-- common_evaluation.md         # Draft of Common Evaluation final report section
+|-- tests/                           # Automated metric and prediction-validation checks
 `-- results/
     |-- figures/                     # EDA plots, calibration, ROC/PR, and clinical tradeoff curves
     |-- tables/                      # Table 1 baseline cohort, OOF metrics, and test comparison
     `-- predictions/                 # Standardized model prediction CSV outputs
 ```
 
-Model scripts, saved split identifiers, environment specifications, and results will be added as the analysis progresses. Their presence is not implied by this proposal-stage layout. Word translations are for review; the course proposal is the root-level Markdown file.
+The shared data, split, EDA, baseline, and evaluation components are implemented. Model-specific pipelines and predictions remain the responsibility of their assigned owners. The current aggregate results therefore contain only the constant baseline and are not the final team comparison.
 
 ## Planned analysis and reproducibility
 
@@ -112,4 +116,20 @@ We will reserve a stratified 20% test set and use the remaining 80% for developm
 
 Primary evaluation will use test AUROC. Secondary evaluation will include AUPRC, Brier score, log loss, calibration plots, and classification metrics at development-selected thresholds. A development sensitivity target of 95% is exploratory, not a clinical standard or a guarantee of test sensitivity. The proposal specifies uncertainty estimates and interpretation limits.
 
-Modeling is planned in Python using scikit-learn. Exact package versions, runnable analysis commands, and fixed split identifiers will be recorded when implementation begins. At the proposal stage, data checks have been completed; predictive model performance has not yet been estimated.
+The shared pipeline was verified with Python 3.14.5 and the package versions pinned in `requirements.txt`. Install them with:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+From the repository root, reproduce and test the shared components with:
+
+```bash
+python3 src/data_prep.py
+MPLBACKEND=Agg python3 src/eda_table1.py
+PYTHONPATH=src python3 src/baseline.py
+MPLBACKEND=Agg PYTHONPATH=src python3 src/evaluate_all.py
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
+
+The held-out comparison is provisional until the remaining model owners add their standardized OOF and test prediction files.

@@ -10,16 +10,15 @@ Includes:
 - Uncertainty: 2,000 paired, class-stratified bootstrap resamples for 95% CIs
 """
 
+from itertools import combinations
+
 import numpy as np
-import pandas as pd
 from sklearn.metrics import (
     roc_auc_score,
     average_precision_score,
     brier_score_loss,
     log_loss,
     confusion_matrix,
-    roc_curve,
-    precision_recall_curve
 )
 
 def select_threshold_target_sensitivity(y_true, y_prob, target_sens=0.95):
@@ -182,8 +181,9 @@ def evaluate_predictions(y_true, y_prob, fixed_threshold=None, target_sens=0.95)
 def bootstrap_confidence_intervals(y_true, y_prob_dict, n_bootstraps=2000, seed=707):
     """
     Computes 2,000 paired, class-stratified bootstrap resamples of records.
-    Estimates 95% CIs for AUROC and Brier score for each model,
-    as well as paired differences against a baseline/comparator model.
+    Estimates 95% CIs for AUROC and Brier score for each model. The same
+    class-stratified record indices are used for every model so that
+    ``boot_stats`` can be passed to :func:`summarize_paired_differences`.
     """
     rng = np.random.RandomState(seed)
     y_true = np.asarray(y_true)
@@ -230,3 +230,57 @@ def bootstrap_confidence_intervals(y_true, y_prob_dict, n_bootstraps=2000, seed=
         }
         
     return summary, boot_stats
+
+
+def summarize_paired_differences(boot_stats, comparator=None):
+    """Summarize paired bootstrap differences between model performances.
+
+    Parameters
+    ----------
+    boot_stats : dict
+        Per-model bootstrap samples returned by
+        :func:`bootstrap_confidence_intervals`.
+    comparator : str or None
+        When supplied, compare every other model against this comparator.
+        Otherwise, report every unordered pair.
+
+    Returns
+    -------
+    list of dict
+        Difference direction is ``model - comparator``. Positive AUROC
+        differences and negative Brier differences favor ``model``.
+    """
+    models = list(boot_stats)
+    if comparator is not None:
+        if comparator not in boot_stats:
+            raise ValueError(f"Comparator {comparator!r} is not present in bootstrap results.")
+        pairs = [(model, comparator) for model in models if model != comparator]
+    else:
+        pairs = list(combinations(models, 2))
+
+    rows = []
+    for model, reference in pairs:
+        model_auc = np.asarray(boot_stats[model]["auroc"], dtype=float)
+        ref_auc = np.asarray(boot_stats[reference]["auroc"], dtype=float)
+        model_brier = np.asarray(boot_stats[model]["brier"], dtype=float)
+        ref_brier = np.asarray(boot_stats[reference]["brier"], dtype=float)
+
+        if not (
+            len(model_auc) == len(ref_auc) == len(model_brier) == len(ref_brier)
+        ):
+            raise ValueError("Paired bootstrap arrays must have identical lengths.")
+
+        auc_diff = model_auc - ref_auc
+        brier_diff = model_brier - ref_brier
+        rows.append({
+            "model_name": model,
+            "comparator": reference,
+            "auroc_difference_mean": float(np.mean(auc_diff)),
+            "auroc_difference_ci_lower": float(np.percentile(auc_diff, 2.5)),
+            "auroc_difference_ci_upper": float(np.percentile(auc_diff, 97.5)),
+            "brier_difference_mean": float(np.mean(brier_diff)),
+            "brier_difference_ci_lower": float(np.percentile(brier_diff, 2.5)),
+            "brier_difference_ci_upper": float(np.percentile(brier_diff, 97.5)),
+        })
+
+    return rows
